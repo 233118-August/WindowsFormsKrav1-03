@@ -18,16 +18,17 @@ namespace WindowsFormsKrav1_03
     public partial class SoftSensConf : Form
     {
         List<int> analogReading = new List<int>();
+        List<int> scaledReading = new List<int>();
         List<DateTime> timeStamp = new List<DateTime>();
- 
         public SoftSensConf()
         {
             InitializeComponent();
             toolStripStatusLabel1.Text = "Not connected";
             toolStripStatusLabel2.Text = "Not active";
+            toolStripStatusLabel2.BackColor = Color.White;
             toolStripStatusLabel1.BackColor = Color.Red;
             comboBox1COM.Items.AddRange(SerialPort.GetPortNames());
-            comboBox1COM.Text = "--Select--";
+            comboBox1COM.Text = "--Select--";     
             string[] bitRate = new string[] { "1200", "2400", "4800t", "9600",
                                               "19200", "38400", "57600", "115200" };
             comboBox2BitRate.Items.AddRange(bitRate);
@@ -37,8 +38,11 @@ namespace WindowsFormsKrav1_03
             timer1.Interval = 5000;
             timer1.Tick += new EventHandler(timer1_Tick);
 
-            timer2.Interval = 4000;
+            timer2.Interval = 4500;
             timer2.Tick += new EventHandler(timer2_Tick);
+
+            timer3.Interval = 5000;
+            timer3.Tick += new EventHandler(timer3_Tick);
         }
         
         string xLabel = string.Empty;
@@ -47,34 +51,74 @@ namespace WindowsFormsKrav1_03
         List<double> Yvalues = new List<double>();
         private void timer1_Tick(object sender, EventArgs e)
         {
-            serialPort1.WriteLine("readraw");
+            if (serialPort1.IsOpen)
+            {
+                serialPort1.WriteLine("readraw");
+            }
         }
-        private void timer2_Tick(object sender,EventArgs e)
+        private void timer2_Tick(object sender, EventArgs e)
         {
-            serialPort1.WriteLine("readstatus");
+            if (serialPort1.IsOpen)
+            {
+                serialPort1.WriteLine("readstatus");
+            }
+            else
+            {
+                toolStripStatusLabel1.Text = ("No connection to device");
+                toolStripStatusLabel1.BackColor = Color.Red;
+                toolStripStatusLabel2.Text = ("Not active");
+                toolStripStatusLabel2.BackColor = Color.Red;
+                timer2.Stop();
+                timer1.Stop();
+                timer3.Stop();
+                MessageBox.Show("No connection to device");
+            }
+        }
+        private void timer3_Tick(object sender, EventArgs e)
+        {
+            if (serialPort1.IsOpen)
+            {
+                serialPort1.WriteLine("readscaled");
+            }
         }
         void DataRecievedHandler(object sender, SerialDataReceivedEventArgs e)
         {
-            //SerialPort sData = sender as SerialPort;
-            //string recvData = sData.ReadLine();
-            // serialData.Invoke((MethodInvoker)delegate 
-            //{ serialData.AppendText(recvData); });
-
             int iVab;
+            float Scaled;
 
             string RecievedData = ((SerialPort)sender).ReadLine();
             serialData.Invoke((MethodInvoker)delegate { serialData.AppendText("\n Recieved: " + RecievedData + "\r\n"); });
             string[] separateParts = RecievedData.Split(';');
+
             if (separateParts[0] == "readraw" & int.TryParse(separateParts[1], out iVab))
             {
                 this.BeginInvoke((Action)delegate ()
                     {
+                        label10.Text = "Raw value, live data:";
                         analogReading.Add(iVab);
                         timeStamp.Add(DateTime.Now);
-                        chart1.Series["Vba"].Points.DataBindXY(timeStamp, analogReading);
+                        chart1.Series["Light level"].Points.DataBindXY(timeStamp, analogReading);
+                        chart1.ChartAreas[0].AxisX.LabelStyle.Format = "HH:mm:ss";
+                        chart1.ChartAreas[0].AxisX.Title = "Time:";
+                        chart1.ChartAreas[0].AxisY.Title = "Light inensity:";
                         chart1.Invalidate();
                     });
             }
+            else if (separateParts[0] == "readscaled" & float.TryParse(separateParts[1], out Scaled))
+                {
+                    this.BeginInvoke((Action)delegate ()
+                    {
+                        label10.Text = "Scaled value, live data:";
+                        int gh = (int)Scaled;
+                        scaledReading.Add(gh);
+                        timeStamp.Add(DateTime.Now);
+                        chart1.Series["Light level"].Points.DataBindXY(timeStamp, scaledReading);
+                        chart1.ChartAreas[0].AxisX.LabelStyle.Format = "HH:mm:ss";
+                        chart1.ChartAreas[0].AxisX.Title = "Time:";
+                        chart1.ChartAreas[0].AxisY.Title = "Light inensity:";
+                        chart1.Invalidate();
+                    });
+                }
             else if (separateParts[0] == "readconf")
             {
 
@@ -132,6 +176,7 @@ namespace WindowsFormsKrav1_03
         {
             if (serialPort1.IsOpen)
             {
+                timer3.Stop();
                 serialData.Text = "";
                 serialData.ReadOnly = true;
                 timer1.Start();
@@ -176,11 +221,11 @@ namespace WindowsFormsKrav1_03
                 serialPort1.Close();
                 if (ex is ArgumentException)
                 {
-                    MessageBox.Show("Ikke gyldig port valgt!");
+                    MessageBox.Show("Port not valid");
                 }
                 else if (ex is UnauthorizedAccessException)
                 {
-                    MessageBox.Show("Ikke tilkoblet. Porten kan være i bruk.");
+                    MessageBox.Show("Not connected, port may be in use");
                 }
                 else
                 {
@@ -192,16 +237,18 @@ namespace WindowsFormsKrav1_03
         {
             toolStripStatusLabel1.Text = "Not connected";
             toolStripStatusLabel1.BackColor = Color.Red;
+            toolStripStatusLabel2.Text = "Not active";
+            toolStripStatusLabel2.BackColor = Color.White;
+
             timer2.Stop();
             serialPort1.Close();
-            MessageBox.Show("Frakoblet!");
+            MessageBox.Show("Disconnected!");
         }
         private void buttonSaveToFile_Click(object sender, EventArgs e)
         {
             string[] lines2 = { "Xvalue; Yvalue", xLabel,  yLabel };
             File.WriteAllLines(@"C:\tmp\Text2.tmp", lines2);
         }
-
         private void OpenFile_Click(object sender, EventArgs e)
         {
             if (openFileDialog1.ShowDialog() == DialogResult.OK)
@@ -229,81 +276,45 @@ namespace WindowsFormsKrav1_03
         }
         private void buttonStop_Click(object sender, EventArgs e)
         {
-            timer1.Stop();
-        }
+            if (serialPort1.IsOpen)
+            {
+                timer1.Stop();  
+                timer3.Stop(); 
+                //serialData.Text = "";
+                serialData.ReadOnly = true;
+            }
 
+            else
+            {
+                MessageBox.Show("Port not open");
+            }
+        }   
         private void buttonFetch_Click(object sender, EventArgs e)
         {
             serialPort1.WriteLine("readconf");
 
         }
-
-
-
-
-        /* private void buttonRead_Click(object sender, EventArgs e)
-         {
-             int alarm;
-             string RecievedData = ((SerialPort)sender).ReadLine();
-             string[] separateParts = RecievedData.Split(';');
-             if (int.TryParse(separateParts[1], out alarm))
-             { 
-             TextBox[] textboxes = { textBoxLowerLimit,
-                                     textBoxUpperLinit,
-                                     textBoxAlarmHigh,
-                                     textBoxAlarmLow,
-             };
-                 textboxes[0].Text = iConfigs[0];
-                 textBoxLowerLimit.Text = iConfigs[1];
-                 textBoxUpperLinit.Text = iConfigs[2];
-                 textBoxAlarmLow.Text = iConfigs[3];
-                 textBoxAlarmHigh.Text = iConfigs[4];
-             }
-         }
-         private void buttonUpdate_Click(object sender, EventArgs e)
-         {
-             for (int i = 0; i < iConfigs.Length; i++)
-             {
-                 switch (i)
-                 {
-                     case 0:
-                         if (textBoxLowerLimit.Text == "")
-                         {
-                             MessageBox.Show("Configuration empty");
-                             textBoxLowerLimit.Focus();
-                         }
-                         break;
-
-                     case 1:
-                         if (textBoxUpperLinit.Text == "")
-                         {
-                             MessageBox.Show("Configuration empty");
-                             textBoxUpperLinit.Focus();
-                         }
-                         break;
-                     case 2:
-                         if (textBoxAlarmLow.Text == "")
-                         {
-                             MessageBox.Show("Configuration empty");
-                             textBoxAlarmLow.Focus();
-                         }
-                         break;
-                     case 3:
-                         if (textBoxAlarmHigh.Text == "")
-                         {
-                             MessageBox.Show("Configuration empty");
-                             textBoxAlarmHigh.Focus();
-                         }
-                         break;
-
-                     default:
-                         iConfigs[i] = textBoxLowerLimit.Text;
-                         iConfigs[i] = textBoxUpperLinit.Text;
-                         iConfigs[i] = textBoxAlarmLow.Text;
-                         iConfigs[i] = textBoxAlarmHigh.Text;
-                         break;
-                 }
-             }
-         }*/
+        private void button2_Click(object sender, EventArgs e)
+        {
+            if (serialPort1.IsOpen)
+            {
+                timer1.Stop();
+                serialData.Text = "";
+                serialData.ReadOnly = true;
+                timer3.Start();
+            }
+            else
+            {
+                MessageBox.Show("Port not open");
+            }
+        }
+        private void button3_Click(object sender, EventArgs e)
+        {
+            string[] write = new string[] {textBoxName11.Text, textBoxLRV.Text,
+                                            textBoxURV.Text, textBoxAL.Text, textBoxAH.Text };
+            string passwordString = textBoxName1.Text;
+            serialPort1.WriteLine ("writeconf>" + passwordString + ">" + string.Join(";", write));
+            
+        }
     }
 }
